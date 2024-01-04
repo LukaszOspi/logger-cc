@@ -5,10 +5,6 @@ from tkinter import ttk, messagebox, scrolledtext
 from tkcalendar import Calendar
 from PIL import Image, ImageTk
 
-# Assuming the global variables are defined and images are loaded into them
-global global_approved_img, global_waiting_img, global_not_approved_img
-
-
 # Database setup
 def setup_database():
     conn = sqlite3.connect('decision_log.db')
@@ -27,22 +23,6 @@ def setup_database():
     ''')
     conn.commit()
     conn.close()
-
-# Load status images for display in Treeview
-def load_status_images():
-    global global_approved_img, global_waiting_img, global_not_approved_img
-
-    try:
-        green_img = Image.open("green_circle.png")
-        yellow_img = Image.open("yellow_circle.png")
-        red_img = Image.open("red_circle.png")
-
-        global_approved_img = ImageTk.PhotoImage(green_img)
-        global_waiting_img = ImageTk.PhotoImage(yellow_img)
-        global_not_approved_img = ImageTk.PhotoImage(red_img)
-    except Exception as e:
-        print(f"Error loading images: {e}")
-
 
 # Logging decisions
 def log_decision(area, decision_maker, decision, reasoning, status, due_date):
@@ -231,19 +211,12 @@ def submit_decision(form, area, decision_maker, decision, reasoning, status, due
     refresh_decision_view()
 
 def refresh_decision_view(status_filter=None, start_date=None, end_date=None):
-    # Use the global image variables in a local dictionary for easy access
-    status_images = {
-        "Approved": global_approved_img,
-        "Waiting": global_waiting_img,
-        "Not Approved": global_not_approved_img
-    }
+
 
     for row in decision_tree.get_children():
         decision_tree.delete(row)
     for decision in retrieve_decisions(status_filter, start_date, end_date):
-        status_icon = status_images.get(decision[6], "None")
-        if status_icon:
-            decision_tree.insert('', 'end', image=status_icon, values=(decision[0], decision[1], decision[2], decision[3], decision[4], decision[5], decision[6], decision[7]))
+            decision_tree.insert('', 'end', values=(decision[0], decision[1], decision[2], decision[3], decision[4], decision[5], decision[6], decision[7]))
 
 def on_decision_select(event):
     selected_item = decision_tree.focus()
@@ -331,9 +304,6 @@ setup_database()
 root = tk.Tk()
 root.title("Decision Logger")
 root.geometry("1400x800")
-
-# Load status images for display in Treeview
-status_images = load_status_images()
 
 # Filter frame setup with calendar selection for start_date_entry and end_date_entry
 filter_frame = tk.Frame(root)
