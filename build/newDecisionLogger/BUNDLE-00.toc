@@ -1,0 +1,3 @@
+([('newDecisionLogger',
+   '/Users/lukasz/workspace/logger_cc/dist/newDecisionLogger',
+   'EXECUTABLE')],)

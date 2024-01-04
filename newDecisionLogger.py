@@ -22,7 +22,7 @@ def setup_database():
             decision TEXT,
             reasoning TEXT,
             status TEXT,
-            due_date TEXT
+            due_date DATE
         )
     ''')
     conn.commit()
@@ -77,11 +77,18 @@ def delete_decision(id):
     conn.close()
 
 # Retrieve decisions with optional filters
+import datetime
+
+def convert_date_format(date_str):
+    """Converts DD-MM-YYYY to MM-DD-YYYY format."""
+    return datetime.datetime.strptime(date_str, "%d-%m-%Y").strftime("%m/%d/%Y")
+
 def retrieve_decisions(status_filter=None, start_date=None, end_date=None):
     conn = sqlite3.connect('decision_log.db')
     c = conn.cursor()
     query = 'SELECT * FROM decisions'
     filters = []
+
     if status_filter or start_date or end_date:
         query += ' WHERE'
         if status_filter:
@@ -90,17 +97,19 @@ def retrieve_decisions(status_filter=None, start_date=None, end_date=None):
         if start_date:
             if filters:
                 query += ' AND'
-            query += ' timestamp >= ?'
-            filters.append(start_date)
-        if end_date:
-            if filters:
-                query += ' AND'
-            query += ' timestamp <= ?'
-            filters.append(end_date)
+        query += ' due_date >= ?'
+        filters.append(start_date)
+    if end_date:
+        if filters:
+            query += ' AND'
+        query += ' due_date <= ?'
+        filters.append(end_date)
+
     c.execute(query, tuple(filters))
     decisions = c.fetchall()
     conn.close()
     return decisions
+
 
 # GUI Functions
 def create_decision_form(is_update=False, decision_data=None):
@@ -175,7 +184,7 @@ def select_date(entry):
     def on_cal_select():
         # Retrieve the selected date and format it to European format (day-month-year)
         selected_date = cal.selection_get()
-        formatted_date = selected_date.strftime("%d-%m-%Y")
+        formatted_date = selected_date.strftime("%Y-%m-%d")
 
         entry.configure(state='normal')  # Enable writing to the entry
         entry.delete(0, tk.END)  # Clear existing content
@@ -189,9 +198,31 @@ def select_date(entry):
     tk.Button(top, text="Select", command=on_cal_select).pack()
 
 
+# Search function
+def search_entries():
+    print("Search function called")  # Debugging print statement
+    search_term = search_var.get().lower()
+
+    for row in decision_tree.get_children():
+        values_str = " ".join(map(str, decision_tree.item(row)['values'])).lower()
+        # Check if the search term is in the concatenated string of values
+        if search_term in values_str:
+            decision_tree.item(row, tags=('visible',))
+        else:
+            decision_tree.item(row, tags=('hidden',))
+
+    # Configure tags to show or hide rows
+    decision_tree.tag_configure('visible', foreground='black')  # Change to default text color
+    decision_tree.tag_configure('hidden', foreground='white')  # Change to background color
+
+    print(f"Searched for: {search_term}")  # Print the search term for debugging
+
+
+
 
 
 def submit_decision(form, area, decision_maker, decision, reasoning, status, due_date, is_update, decision_id):
+    print("Submit button clicked")
     if is_update:
         update_decision(decision_id, area, decision_maker, decision, reasoning, status, due_date)
     else:
@@ -226,18 +257,59 @@ def delete_selected_decision():
     if decision_data and messagebox.askyesno("Delete Confirmation", "Are you sure you want to delete this decision?"):
         delete_decision(decision_data[0])
         refresh_decision_view()
-
 def apply_filters():
-    status_filter = status_var.get() if status_var.get() != "All" else None
     start_date = start_date_entry.get() if start_date_entry.get() else None
     end_date = end_date_entry.get() if end_date_entry.get() else None
+    global status_var  # Ensure that status_var is accessible
+
+    status_filter = status_var.get() if status_var.get() != "All" else None
+    print(f"Status filter applied: {status_filter}")  # Debugging print
+
+    print(f"Applying filters with start_date: {start_date}, end_date: {end_date}")
     refresh_decision_view(status_filter, start_date, end_date)
 
+    if start_date and end_date:
+        start_date_obj = datetime.datetime.strptime(start_date, "%d-%m-%Y")
+        end_date_obj = datetime.datetime.strptime(end_date, "%d-%m-%Y")
+        if start_date_obj > end_date_obj:
+            messagebox.showerror("Date Error", "Start date cannot be after end date.")
+            return
+
 def clear_filters():
+    print("Clearing filters...")  # Debugging print
+
+    # Reset status filter
     status_var.set("All")
+
+    # Clear the date entries
+    print(f"Before clear: Start Date - {start_date_entry.get()}, End Date - {end_date_entry.get()}")
+    # Temporarily enable, clear, and disable the date entries
+    start_date_entry.config(state=tk.NORMAL)
     start_date_entry.delete(0, tk.END)
+    start_date_entry.config(state='readonly')
+
+    end_date_entry.config(state=tk.NORMAL)
     end_date_entry.delete(0, tk.END)
+    end_date_entry.config(state='readonly')
+
+    print(f"After clear: Start Date - {start_date_entry.get()}, End Date - {end_date_entry.get()}")
+
+    # Clear the search entry
+    search_var.set("")
+    search_entry.delete(0, tk.END)
+
+    # Reset the treeview to show all entries
+    for row in decision_tree.get_children():
+        decision_tree.item(row, tags=('visible',))
+    decision_tree.tag_configure('visible', foreground='black')  # Or your default text color
+
+    # Refresh the treeview with all entries
     refresh_decision_view()
+
+    # Force GUI update (if necessary)
+    root.update()
+
+
 
 def treeview_sort_column(tv, col, reverse):
     l = [(tv.set(k, col), k) for k in tv.get_children('')]
@@ -258,7 +330,7 @@ setup_database()
 # Tkinter window setup with increased width and scrollbar
 root = tk.Tk()
 root.title("Decision Logger")
-root.geometry("1200x600")
+root.geometry("1400x800")
 
 # Load status images for display in Treeview
 status_images = load_status_images()
@@ -322,12 +394,23 @@ decision_tree.pack(fill="both", expand=True)
 log_button = tk.Button(root, text="Log New Decision", command=lambda: create_decision_form())
 log_button.pack(side=tk.LEFT)
 delete_button = tk.Button(root, text="Delete Selected Decision", command=delete_selected_decision)
-delete_button.pack(side=tk.LEFT)
+delete_button.pack(side=tk.RIGHT)
 refresh_button = tk.Button(root, text="Refresh", command=lambda: refresh_decision_view())
 refresh_button.pack(side=tk.RIGHT)
 
 # Bind double-click event to Treeview for updating entries
 decision_tree.bind("<Double-1>", on_decision_select)
+
+# Add search entry and button in filter_frame
+tk.Label(filter_frame, text="Search:").pack(side=tk.LEFT)
+search_var = tk.StringVar(root)
+search_entry = tk.Entry(filter_frame, textvariable=search_var)
+search_entry.pack(side=tk.LEFT)
+search_button = tk.Button(filter_frame, text="Search", command=search_entries)
+search_button.pack(side=tk.LEFT)
+
+# Bind the Enter key with the search function
+search_entry.bind('<Return>', lambda event: search_entries())
 
 # First refresh of the treeview
 refresh_decision_view()
