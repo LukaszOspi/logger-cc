@@ -1,28 +1,38 @@
 import sqlite3
 import datetime
 import tkinter as tk
+import threading
+import cProfile
 from tkinter import ttk, messagebox, scrolledtext
 from tkcalendar import Calendar
 from PIL import Image, ImageTk
 
 # Database setup
+# Database setup and connection
+conn = sqlite3.connect('decision_log.db')
+
 def setup_database():
-    conn = sqlite3.connect('decision_log.db')
     c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS decisions (
-            id INTEGER PRIMARY KEY,
-            timestamp TEXT,
-            area TEXT,
-            decision_maker TEXT,
-            decision TEXT,
-            reasoning TEXT,
-            status TEXT,
-            due_date DATE
-        )
-    ''')
+    c.execute('''CREATE TABLE IF NOT EXISTS decisions (
+                    id INTEGER PRIMARY KEY,
+                    timestamp TEXT,
+                    area TEXT,
+                    decision_maker TEXT,
+                    decision TEXT,
+                    reasoning TEXT,
+                    status TEXT,
+                    due_date DATE
+                )''')
     conn.commit()
-    conn.close()
+
+def execute_db_query(query, parameters=()):
+    c = conn.cursor()
+    c.execute(query, parameters)
+    if query.lstrip().upper().startswith("SELECT"):
+        return c.fetchall()
+    conn.commit()
+
+setup_database()  # Initialize database
 
 # Logging decisions
 def log_decision(area, decision_maker, decision, reasoning, status, due_date):
@@ -64,31 +74,55 @@ def convert_date_format(date_str):
     return datetime.datetime.strptime(date_str, "%d-%m-%Y").strftime("%m/%d/%Y")
 
 def retrieve_decisions(status_filter=None, start_date=None, end_date=None):
-    conn = sqlite3.connect('decision_log.db')
-    c = conn.cursor()
     query = 'SELECT * FROM decisions'
     filters = []
 
-    if status_filter or start_date or end_date:
-        query += ' WHERE'
-        if status_filter:
-            query += ' status = ?'
-            filters.append(status_filter)
-        if start_date:
-            if filters:
-                query += ' AND'
+    if status_filter:
+        filters.append(status_filter)
+        query += ' WHERE status = ?'
+
+    if start_date:
+        if not filters:
+            query += ' WHERE'
+        else:
+            query += ' AND'
         query += ' due_date >= ?'
         filters.append(start_date)
+
     if end_date:
-        if filters:
+        if not filters:
+            query += ' WHERE'
+        else:
             query += ' AND'
         query += ' due_date <= ?'
         filters.append(end_date)
 
+    c = conn.cursor()
     c.execute(query, tuple(filters))
     decisions = c.fetchall()
-    conn.close()
     return decisions
+
+
+# Threaded GUI functions
+def update_treeview(decisions):
+    # Clear existing rows
+    decision_tree.delete(*decision_tree.get_children())
+    # Populate the treeview with new data
+    for decision in decisions:
+        decision_tree.insert('', 'end', values=decision)
+
+def retrieve_decisions_threaded(status_filter=None, start_date=None, end_date=None):
+    # This function will run in a separate thread
+    decisions = retrieve_decisions(status_filter, start_date, end_date)
+    # After retrieving decisions, update the GUI from the main thread
+    root.after(0, lambda: update_treeview(decisions))
+
+def refresh_decision_view(status_filter=None, start_date=None, end_date=None):
+
+       # Start the retrieve_decisions operation in a separate thread
+    thread = threading.Thread(target=retrieve_decisions_threaded, args=(status_filter, start_date, end_date))
+    thread.daemon = True  # Set the thread as a daemon
+    thread.start()
 
 
 # GUI Functions
@@ -211,12 +245,9 @@ def submit_decision(form, area, decision_maker, decision, reasoning, status, due
     refresh_decision_view()
 
 def refresh_decision_view(status_filter=None, start_date=None, end_date=None):
-
-
-    for row in decision_tree.get_children():
-        decision_tree.delete(row)
+    decision_tree.delete(*decision_tree.get_children())  # Clear existing rows
     for decision in retrieve_decisions(status_filter, start_date, end_date):
-            decision_tree.insert('', 'end', values=(decision[0], decision[1], decision[2], decision[3], decision[4], decision[5], decision[6], decision[7]))
+        decision_tree.insert('', 'end', values=decision)
 
 def on_decision_select(event):
     selected_item = decision_tree.focus()
@@ -241,9 +272,12 @@ def apply_filters():
     print(f"Applying filters with start_date: {start_date}, end_date: {end_date}")
     refresh_decision_view(status_filter, start_date, end_date)
 
-    if start_date and end_date:
-        start_date_obj = datetime.datetime.strptime(start_date, "%d-%m-%Y")
-        end_date_obj = datetime.datetime.strptime(end_date, "%d-%m-%Y")
+      # Convert start_date and end_date from 'YYYY-MM-DD' to datetime objects
+    if start_date:
+        start_date_obj = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+    if end_date:
+        end_date_obj = datetime.datetime.strptime(end_date, "%Y-%m-%d")
+
         if start_date_obj > end_date_obj:
             messagebox.showerror("Date Error", "Start date cannot be after end date.")
             return
@@ -386,4 +420,22 @@ search_entry.bind('<Return>', lambda event: search_entries())
 refresh_decision_view()
 
 # Start the main GUI loop
-root.mainloop()
+def on_closing():
+    conn.close()
+    root.destroy()
+
+root.protocol("WM_DELETE_WINDOW", on_closing)
+
+
+# Function to start the main loop and profile it
+def start_main_loop():
+    root.mainloop()
+
+if __name__ == "__main__":
+    # Run the main loop under the profiler
+    cProfile.run('start_main_loop()', 'profile_stats')
+
+    # Optionally, you can add code here to automatically analyze and print the stats after the GUI is closed
+    import pstats
+    p = pstats.Stats('profile_stats')
+    p.sort_stats('cumulative').print_stats(10)  # Adjust the number as needed
