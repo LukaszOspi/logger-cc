@@ -1,15 +1,14 @@
 import sqlite3
 import datetime
 import tkinter as tk
+import tkmacosx as tkm
 import threading
 import cProfile
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox
 from tkcalendar import Calendar
-from PIL import Image, ImageTk
 
-# Database setup
 # Database setup and connection
-conn = sqlite3.connect('decision_log.db')
+conn = sqlite3.connect('decision_log.db', check_same_thread=False)  # Allow multi-threaded access
 
 def setup_database():
     c = conn.cursor()
@@ -32,23 +31,20 @@ def execute_db_query(query, parameters=()):
         return c.fetchall()
     conn.commit()
 
-setup_database()  # Initialize database
 
 # Logging decisions
 def log_decision(area, decision_maker, decision, reasoning, status, due_date):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn = sqlite3.connect('decision_log.db')
     c = conn.cursor()
     c.execute('''
         INSERT INTO decisions (timestamp, area, decision_maker, decision, reasoning, status, due_date)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     ''', (timestamp, area, decision_maker, decision, reasoning, status, due_date))
     conn.commit()
-    conn.close()
+
 
 # Update decision
 def update_decision(id, area, decision_maker, decision, reasoning, status, due_date):
-    conn = sqlite3.connect('decision_log.db')
     c = conn.cursor()
     c.execute('''
         UPDATE decisions
@@ -56,15 +52,14 @@ def update_decision(id, area, decision_maker, decision, reasoning, status, due_d
         WHERE id = ?
     ''', (area, decision_maker, decision, reasoning, status, due_date, id))
     conn.commit()
-    conn.close()
+   
 
 # Delete decision
 def delete_decision(id):
-    conn = sqlite3.connect('decision_log.db')
     c = conn.cursor()
     c.execute('DELETE FROM decisions WHERE id = ?', (id,))
     conn.commit()
-    conn.close()
+   
 
 # Retrieve decisions with optional filters
 import datetime
@@ -77,30 +72,21 @@ def retrieve_decisions(status_filter=None, start_date=None, end_date=None):
     query = 'SELECT * FROM decisions'
     filters = []
 
+    # Simplified conditional logic
     if status_filter:
-        filters.append(status_filter)
         query += ' WHERE status = ?'
-
+        filters.append(status_filter)
     if start_date:
-        if not filters:
-            query += ' WHERE'
-        else:
-            query += ' AND'
+        query += ' AND' if filters else ' WHERE'
         query += ' due_date >= ?'
         filters.append(start_date)
-
     if end_date:
-        if not filters:
-            query += ' WHERE'
-        else:
-            query += ' AND'
+        query += ' AND' if filters else ' WHERE'
         query += ' due_date <= ?'
         filters.append(end_date)
 
-    c = conn.cursor()
-    c.execute(query, tuple(filters))
-    decisions = c.fetchall()
-    return decisions
+    return execute_db_query(query, tuple(filters))
+
 
 
 # Threaded GUI functions
@@ -170,13 +156,13 @@ def create_decision_form(is_update=False, decision_data=None):
     status_menu.grid(row=row, column=1, sticky='w')
     row += 1
 
-    # Due Date Selection with Calendar
+ 
  # Due Date Selection with Calendar
     tk.Label(form, text="Due Date:").grid(row=row, column=0, sticky='w')
     due_date_entry = tk.Entry(form, state='readonly')  # Set to readonly
     due_date_entry.grid(row=row, column=1, sticky='w')
     row += 1
-    due_date_button = tk.Button(form, text="Select Date", command=lambda: select_date(due_date_entry))
+    due_date_button = tkm.Button(form, text="Select Date", command=lambda: select_date(due_date_entry))
     due_date_button.grid(row=row, column=1, sticky='w')
 
     row += 1
@@ -186,12 +172,10 @@ def create_decision_form(is_update=False, decision_data=None):
         due_date_entry.insert(0, decision_data[7])
         due_date_entry.configure(state='readonly')
 
-# Rest of the code for submit button...
-
     row += 1
 
     submit_button_text = "Update Decision" if is_update else "Log Decision"
-    submit_button = tk.Button(form, text=submit_button_text, command=lambda: submit_decision(form, area_entry.get(), decision_maker_entry.get(), decision_entry.get("1.0", tk.END), reasoning_entry.get("1.0", tk.END), status_var.get(), due_date_entry.get(), is_update, decision_data[0] if decision_data else None))
+    submit_button = tkm.Button(form, text=submit_button_text, command=lambda: submit_decision(form, area_entry.get(), decision_maker_entry.get(), decision_entry.get("1.0", tk.END), reasoning_entry.get("1.0", tk.END), status_var.get(), due_date_entry.get(), is_update, decision_data[0] if decision_data else None))
     submit_button.grid(row=row, column=0, columnspan=3,  sticky='w')
 
 def select_date(entry):
@@ -209,7 +193,7 @@ def select_date(entry):
     top = tk.Toplevel(root)
     cal = Calendar(top, selectmode='day')
     cal.pack(padx=10, pady=10)
-    tk.Button(top, text="Select", command=on_cal_select).pack()
+    tkm.Button(top, text="Select", command=on_cal_select).pack()
 
 
 # Search function
@@ -230,9 +214,6 @@ def search_entries():
     decision_tree.tag_configure('hidden', foreground='white')  # Change to background color
 
     print(f"Searched for: {search_term}")  # Print the search term for debugging
-
-
-
 
 
 def submit_decision(form, area, decision_maker, decision, reasoning, status, due_date, is_update, decision_id):
@@ -261,6 +242,7 @@ def delete_selected_decision():
     if decision_data and messagebox.askyesno("Delete Confirmation", "Are you sure you want to delete this decision?"):
         delete_decision(decision_data[0])
         refresh_decision_view()
+
 def apply_filters():
     start_date = start_date_entry.get() if start_date_entry.get() else None
     end_date = end_date_entry.get() if end_date_entry.get() else None
@@ -272,15 +254,20 @@ def apply_filters():
     print(f"Applying filters with start_date: {start_date}, end_date: {end_date}")
     refresh_decision_view(status_filter, start_date, end_date)
 
-      # Convert start_date and end_date from 'YYYY-MM-DD' to datetime objects
-    if start_date:
-        start_date_obj = datetime.datetime.strptime(start_date, "%Y-%m-%d")
-    if end_date:
-        end_date_obj = datetime.datetime.strptime(end_date, "%Y-%m-%d")
+    try:
+            if start_date:
+                start_date_obj = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+            if end_date:
+                end_date_obj = datetime.datetime.strptime(end_date, "%Y-%m-%d")
 
-        if start_date_obj > end_date_obj:
-            messagebox.showerror("Date Error", "Start date cannot be after end date.")
+            if start_date and end_date and start_date_obj > end_date_obj:
+                messagebox.showerror("Date Error", "Start date cannot be after end date.")
+                return
+    except ValueError as e:
+            messagebox.showerror("Date Format Error", str(e))
             return
+
+    refresh_decision_view(status_filter, start_date, end_date)
 
 def clear_filters():
     print("Clearing filters...")  # Debugging print
@@ -313,11 +300,6 @@ def clear_filters():
     # Refresh the treeview with all entries
     refresh_decision_view()
 
-    # Force GUI update (if necessary)
-    root.update()
-
-
-
 def treeview_sort_column(tv, col, reverse):
     l = [(tv.set(k, col), k) for k in tv.get_children('')]
     l.sort(reverse=reverse)
@@ -331,13 +313,10 @@ def on_decision_select(event):
     if decision_data:
         create_decision_form(True, decision_data)
 
-# Initialize the database
-setup_database()
-
 # Tkinter window setup with increased width and scrollbar
 root = tk.Tk()
 root.title("Decision Logger")
-root.geometry("1400x800")
+root.geometry("1450x800")
 
 # Filter frame setup with calendar selection for start_date_entry and end_date_entry
 filter_frame = tk.Frame(root)
@@ -356,19 +335,19 @@ status_menu.pack(side=tk.LEFT)
 tk.Label(filter_frame, text="Start Date:").pack(side=tk.LEFT)
 start_date_entry = tk.Entry(filter_frame, state='readonly')
 start_date_entry.pack(side=tk.LEFT)
-start_date_button = tk.Button(filter_frame, text="Select", command=lambda: select_date(start_date_entry))
+start_date_button = tkm.Button(filter_frame, text="Select", command=lambda: select_date(start_date_entry))
 start_date_button.pack(side=tk.LEFT)
 
 # End Date Filter
 tk.Label(filter_frame, text="End Date:").pack(side=tk.LEFT)
 end_date_entry = tk.Entry(filter_frame, state='readonly')
 end_date_entry.pack(side=tk.LEFT)
-end_date_button = tk.Button(filter_frame, text="Select", command=lambda: select_date(end_date_entry))
+end_date_button = tkm.Button(filter_frame, text="Select", command=lambda: select_date(end_date_entry))
 end_date_button.pack(side=tk.LEFT)
 
-apply_button = tk.Button(filter_frame, text="Apply Filters", command=apply_filters)
+apply_button = tkm.Button(filter_frame, text="Apply Filters", command=apply_filters)
 apply_button.pack(side=tk.LEFT)
-clear_button = tk.Button(filter_frame, text="Clear Filters", command=clear_filters)
+clear_button = tkm.Button(filter_frame, text="Clear Filters", command=clear_filters)
 clear_button.pack(side=tk.LEFT)
 
 # Decision tree view with scrollbars
@@ -385,7 +364,6 @@ columns = ("ID", "Timestamp", "Area", "Decision Maker", "Decision", "Reasoning",
 decision_tree = ttk.Treeview(tree_frame, columns=columns, show="headings", yscrollcommand=tree_scroll_y.set, xscrollcommand=tree_scroll_x.set)
 
 # Configure the column widths
-decision_tree.column("#0", width=20, anchor='center')  # Width for the image column
 for col in columns:
     decision_tree.heading(col, text=col, command=lambda _col=col: treeview_sort_column(decision_tree, _col, False))
     decision_tree.column(col, anchor=tk.CENTER, width=100)
@@ -395,11 +373,11 @@ tree_scroll_x.config(command=decision_tree.xview)
 decision_tree.pack(fill="both", expand=True)
 
 # Buttons
-log_button = tk.Button(root, text="Log New Decision", command=lambda: create_decision_form())
+log_button = tkm.Button(root, text="Log New Decision", command=lambda: create_decision_form())
 log_button.pack(side=tk.LEFT)
-delete_button = tk.Button(root, text="Delete Selected Decision", command=delete_selected_decision)
+delete_button = tkm.Button(root, text="Delete Selected Decision", command=delete_selected_decision)
 delete_button.pack(side=tk.RIGHT)
-refresh_button = tk.Button(root, text="Refresh", command=lambda: refresh_decision_view())
+refresh_button = tkm.Button(root, text="Refresh", command=lambda: refresh_decision_view())
 refresh_button.pack(side=tk.RIGHT)
 
 # Bind double-click event to Treeview for updating entries
@@ -410,7 +388,7 @@ tk.Label(filter_frame, text="Search:").pack(side=tk.LEFT)
 search_var = tk.StringVar(root)
 search_entry = tk.Entry(filter_frame, textvariable=search_var)
 search_entry.pack(side=tk.LEFT)
-search_button = tk.Button(filter_frame, text="Search", command=search_entries)
+search_button = tkm.Button(filter_frame, text="Search", command=search_entries)
 search_button.pack(side=tk.LEFT)
 
 # Bind the Enter key with the search function
@@ -419,7 +397,7 @@ search_entry.bind('<Return>', lambda event: search_entries())
 # First refresh of the treeview
 refresh_decision_view()
 
-# Start the main GUI loop
+
 def on_closing():
     conn.close()
     root.destroy()
@@ -432,6 +410,10 @@ def start_main_loop():
     root.mainloop()
 
 if __name__ == "__main__":
+
+    setup_database()  # Ensure database is setup
+    start_main_loop()  # Start the main loop
+
     # Run the main loop under the profiler
     cProfile.run('start_main_loop()', 'profile_stats')
 
